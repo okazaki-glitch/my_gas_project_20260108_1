@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top" />
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f7f4ee;
+        --card: #ffffff;
+        --ink: #1f2a37;
+        --muted: #6b7280;
+        --accent: #1b4965;
+        --accent-2: #5fa8d3;
+        --border: #e2e8f0;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Noto Sans JP", "Hiragino Kaku Gothic ProN", "Meiryo", sans-serif;
+        background: linear-gradient(135deg, #f7f4ee 0%, #e4eef5 100%);
+        color: var(--ink);
+      }
+
+      .app {
+        padding: 16px 18px 24px;
+      }
+
+      h1 {
+        font-size: 20px;
+        margin: 0 0 16px;
+        letter-spacing: 0.02em;
+      }
+
+      h2 {
+        font-size: 15px;
+        margin: 0 0 10px;
+      }
+
+      .card {
+        background: var(--card);
+        border-radius: 12px;
+        border: 1px solid var(--border);
+        padding: 14px;
+        box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+        margin-bottom: 16px;
+      }
+
+      .grid {
+        display: grid;
+        gap: 10px;
+      }
+
+      label {
+        font-size: 12px;
+        color: var(--muted);
+        display: block;
+        margin-bottom: 4px;
+      }
+
+      input,
+      textarea {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 8px 10px;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        background: #fff;
+        color: var(--ink);
+        font-size: 13px;
+      }
+
+      textarea {
+        resize: vertical;
+        min-height: 60px;
+      }
+
+      .summary {
+        display: grid;
+        gap: 6px;
+        padding: 10px;
+        background: #f8fbff;
+        border-radius: 10px;
+        border: 1px dashed #cbd5f5;
+        font-size: 13px;
+      }
+
+      .summary span {
+        font-weight: 600;
+      }
+
+      button {
+        background: var(--accent);
+        color: #fff;
+        border: none;
+        padding: 9px 14px;
+        border-radius: 999px;
+        cursor: pointer;
+        font-size: 13px;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+      }
+
+      button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 8px 16px rgba(27, 73, 101, 0.18);
+      }
+
+      button.secondary {
+        background: var(--accent-2);
+      }
+
+      button:disabled {
+        opacity: 0.6;
+        cursor: default;
+        box-shadow: none;
+      }
+
+      .status {
+        margin-top: 8px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .note {
+        font-size: 11px;
+        color: var(--muted);
+        margin-top: 6px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <h1>ランニングカロリー管理</h1>
+
+      <div class="card">
+        <h2>記録</h2>
+        <div class="grid">
+          <div>
+            <label for="date">日付</label>
+            <input id="date" type="date" />
+          </div>
+          <div>
+            <label for="distance">距離 (km)</label>
+            <input id="distance" type="number" step="0.1" min="0" />
+          </div>
+          <div>
+            <label for="duration">時間 (分)</label>
+            <input id="duration" type="number" step="1" min="0" />
+          </div>
+          <div>
+            <label for="weight">体重 (kg)</label>
+            <input id="weight" type="number" step="0.1" min="0" />
+          </div>
+          <div>
+            <label for="memo">メモ</label>
+            <textarea id="memo" placeholder="天気や体調など"></textarea>
+          </div>
+        </div>
+
+        <div class="summary">
+          <div>推定消費: <span id="previewCalories">0</span> kcal</div>
+          <div>今日の合計: <span id="todayTotal">0</span> kcal</div>
+          <div>目標との差: <span id="todayDiff">残り 0</span> kcal</div>
+        </div>
+        <div class="note">時間を入力すると速度に応じたMETで計算します。</div>
+
+        <button id="saveBtn">記録する</button>
+        <div id="saveResult" class="status"></div>
+      </div>
+
+      <div class="card">
+        <h2>設定</h2>
+        <div class="grid">
+          <div>
+            <label for="defaultWeight">体重(kg)の初期値</label>
+            <input id="defaultWeight" type="number" step="0.1" min="0" />
+          </div>
+          <div>
+            <label for="dailyTarget">1日の目標摂取カロリー (kcal)</label>
+            <input id="dailyTarget" type="number" step="1" min="0" />
+          </div>
+        </div>
+        <button id="saveSettingsBtn" class="secondary">設定を保存</button>
+        <div id="settingsResult" class="status"></div>
+      </div>
+    </div>
+
+    <script>
+      const state = {
+        settings: { defaultWeightKg: 60, dailyTargetKcal: 2000 },
+        todaySummary: { totalCalories: 0, count: 0 },
+        today: "",
+      };
+
+      function onLoad() {
+        bindEvents();
+        google.script.run
+          .withSuccessHandler(applyAppData)
+          .withFailureHandler(handleError)
+          .getAppData();
+      }
+
+      function bindEvents() {
+        ["distance", "duration", "weight"].forEach((id) => {
+          document.getElementById(id).addEventListener("input", updatePreview);
+        });
+
+        document
+          .getElementById("dailyTarget")
+          .addEventListener("input", updateSummaryDisplay);
+
+        document.getElementById("saveBtn").addEventListener("click", saveRecord);
+        document
+          .getElementById("saveSettingsBtn")
+          .addEventListener("click", saveSettings);
+      }
+
+      // 設定と当日サマリーを画面に反映する
+      function applyAppData(data) {
+        if (!data) {
+          return;
+        }
+        state.settings = data.settings || state.settings;
+        state.todaySummary = data.todaySummary || state.todaySummary;
+        state.today = data.today || state.today;
+
+        document.getElementById("date").value = state.today;
+        document.getElementById("weight").value =
+          state.settings.defaultWeightKg || "";
+        document.getElementById("defaultWeight").value =
+          state.settings.defaultWeightKg || "";
+        document.getElementById("dailyTarget").value =
+          state.settings.dailyTargetKcal || "";
+
+        updatePreview();
+        updateSummaryDisplay();
+      }
+
+      function saveRecord() {
+        const button = document.getElementById("saveBtn");
+        button.disabled = true;
+        setStatus("saveResult", "保存中...");
+
+        const payload = {
+          date: document.getElementById("date").value,
+          distanceKm: getNumber("distance"),
+          durationMin: getNumber("duration"),
+          weightKg: getWeightValue(),
+          memo: document.getElementById("memo").value,
+        };
+
+        google.script.run
+          .withSuccessHandler((result) => {
+            button.disabled = false;
+            if (result && result.summary) {
+              state.todaySummary = result.summary;
+            }
+            updateSummaryDisplay();
+            setStatus(
+              "saveResult",
+              "保存しました。推定消費 " + (result?.calories || 0) + " kcal"
+            );
+            document.getElementById("distance").value = "";
+            document.getElementById("duration").value = "";
+            document.getElementById("memo").value = "";
+            updatePreview();
+          })
+          .withFailureHandler((error) => {
+            button.disabled = false;
+            setStatus("saveResult", "保存に失敗しました: " + error.message);
+          })
+          .saveRunRecord(payload);
+      }
+
+      function saveSettings() {
+        const button = document.getElementById("saveSettingsBtn");
+        button.disabled = true;
+        setStatus("settingsResult", "保存中...");
+
+        const payload = {
+          defaultWeightKg: getNumber("defaultWeight"),
+          dailyTargetKcal: getNumber("dailyTarget"),
+        };
+
+        google.script.run
+          .withSuccessHandler((result) => {
+            button.disabled = false;
+            state.settings = result || state.settings;
+            document.getElementById("weight").value =
+              state.settings.defaultWeightKg || "";
+            updateSummaryDisplay();
+            setStatus("settingsResult", "設定を保存しました。");
+          })
+          .withFailureHandler((error) => {
+            button.disabled = false;
+            setStatus("settingsResult", "保存に失敗しました: " + error.message);
+          })
+          .saveSettings(payload);
+      }
+
+      function updatePreview() {
+        const distance = getNumber("distance");
+        const duration = getNumber("duration");
+        const weight = getWeightValue();
+        const calories = Math.round(calcCalories(distance, duration, weight));
+        document.getElementById("previewCalories").textContent = String(
+          calories || 0
+        );
+      }
+
+      function updateSummaryDisplay() {
+        const total = state.todaySummary.totalCalories || 0;
+        const target =
+          getNumber("dailyTarget") || state.settings.dailyTargetKcal || 0;
+        document.getElementById("todayTotal").textContent = String(total);
+        const diff = target - total;
+        const diffText =
+          diff >= 0 ? "残り " + diff : "超過 " + Math.abs(diff);
+        document.getElementById("todayDiff").textContent = diffText;
+      }
+
+      function calcCalories(distanceKm, durationMin, weightKg) {
+        if (!distanceKm || !weightKg) {
+          return 0;
+        }
+        if (durationMin && durationMin > 0) {
+          const hours = durationMin / 60;
+          const speed = distanceKm / hours;
+          const met = resolveMet(speed);
+          return met * weightKg * hours;
+        }
+        return 1.036 * weightKg * distanceKm;
+      }
+
+      function resolveMet(speedKmh) {
+        if (speedKmh < 6.4) return 6.0;
+        if (speedKmh < 8.0) return 8.3;
+        if (speedKmh < 9.7) return 9.8;
+        if (speedKmh < 11.3) return 11.0;
+        if (speedKmh < 12.9) return 11.8;
+        if (speedKmh < 14.5) return 12.8;
+        if (speedKmh < 16.1) return 14.5;
+        return 16.0;
+      }
+
+      function getWeightValue() {
+        const input = getNumber("weight");
+        if (input) {
+          return input;
+        }
+        return state.settings.defaultWeightKg || 0;
+      }
+
+      function getNumber(id) {
+        const value = Number(document.getElementById(id).value);
+        return Number.isFinite(value) ? value : 0;
+      }
+
+      function setStatus(id, message) {
+        const target = document.getElementById(id);
+        target.textContent = message;
+      }
+
+      function handleError(error) {
+        setStatus("saveResult", "読み込みに失敗しました: " + error.message);
+      }
+
+      document.addEventListener("DOMContentLoaded", onLoad);
+    </script>
+  </body>
+</html>
