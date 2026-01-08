@@ -174,8 +174,8 @@
 
         <div class="summary">
           <div>推定消費: <span id="previewCalories">0</span> kcal</div>
-          <div>今日の合計: <span id="todayTotal">0</span> kcal</div>
-          <div>目標との差: <span id="todayDiff">残り 0</span> kcal</div>
+          <div>今月の総消費: <span id="todayTotal">0</span> kcal</div>
+          <div>目標まで残り: <span id="todayDiff">0</span> kcal</div>
         </div>
         <div class="note">時間を入力すると速度に応じたMETで計算します。</div>
 
@@ -196,16 +196,28 @@
             目標収支: <span id="targetAmount">0</span> kcal
           </div>
           <div>
+            目標総消費: <span id="targetTotalBurn">0</span> kcal
+          </div>
+          <div>
+            活動レベル: <span id="activityLevelLabel">-</span>
+          </div>
+          <div>
+            活動係数: <span id="activityFactor">0</span>
+          </div>
+          <div>
             基礎代謝 (1日): <span id="bmrPerDay">0</span> kcal
           </div>
           <div>
-            基礎代謝合計: <span id="bmrTotal">0</span> kcal
+            活動レベル反映 (1日): <span id="energyPerDay">0</span> kcal
+          </div>
+          <div>
+            活動レベル反映合計: <span id="energyTotal">0</span> kcal
           </div>
           <div>
             ランニング消費合計: <span id="runningTotal">0</span> kcal
           </div>
           <div>
-            今月ここまでの消費: <span id="totalBurn">0</span> kcal
+            今月ここまでの総消費: <span id="totalBurn">0</span> kcal
           </div>
           <div>
             今月ここまでの摂取目標: <span id="targetIntake">0</span> kcal
@@ -218,7 +230,7 @@
           </div>
         </div>
         <div class="note">
-          性別・年齢から推定した平均基礎代謝を用います。月間目標は減量なら
+          性別・年齢の基礎代謝に活動レベル係数を掛けて算出します。月間目標は減量なら
           マイナス値で入力してください。
         </div>
       </div>
@@ -233,6 +245,14 @@
           <div>
             <label for="dailyTarget">1日の目標摂取カロリー (kcal)</label>
             <input id="dailyTarget" type="number" step="1" min="0" />
+          </div>
+          <div>
+            <label for="activityLevel">活動レベル</label>
+            <select id="activityLevel">
+              <option value="low">低い</option>
+              <option value="medium">標準</option>
+              <option value="high">高い</option>
+            </select>
           </div>
           <div>
             <label for="gender">性別</label>
@@ -263,16 +283,22 @@
           gender: "male",
           age: 30,
           monthlyGoalKg: -1,
+          activityLevel: "medium",
         },
         todaySummary: { totalCalories: 0, count: 0 },
         monthlySummary: {
           monthKey: "",
           daysInMonth: 0,
           daysElapsed: 0,
+          activityLevel: "medium",
+          activityFactor: 1.55,
           bmrPerDay: 0,
           bmrTotal: 0,
+          energyPerDay: 0,
+          energyTotal: 0,
           runningTotal: 0,
           totalBurn: 0,
+          targetTotalBurn: 0,
           targetIntakeTotal: 0,
           deficit: 0,
           goalKg: -1,
@@ -307,7 +333,7 @@
           .addEventListener("click", saveSettings);
       }
 
-      // 設定と当日サマリーを画面に反映する
+      // 設定とサマリーを画面に反映する
       function applyAppData(data) {
         if (!data) {
           return;
@@ -324,6 +350,8 @@
           state.settings.defaultWeightKg || "";
         document.getElementById("dailyTarget").value =
           state.settings.dailyTargetKcal || "";
+        document.getElementById("activityLevel").value =
+          state.settings.activityLevel || "medium";
         document.getElementById("gender").value = state.settings.gender || "male";
         document.getElementById("age").value = state.settings.age || "";
         document.getElementById("monthlyGoal").value =
@@ -382,6 +410,7 @@
         const payload = {
           defaultWeightKg: getNumber("defaultWeight"),
           dailyTargetKcal: getNumber("dailyTarget"),
+          activityLevel: document.getElementById("activityLevel").value,
           gender: document.getElementById("gender").value,
           age: getNumber("age"),
           monthlyGoalKg: getNumber("monthlyGoal"),
@@ -422,14 +451,14 @@
       }
 
       function updateSummaryDisplay() {
-        const total = state.todaySummary.totalCalories || 0;
-        const target =
-          getNumber("dailyTarget") || state.settings.dailyTargetKcal || 0;
-        document.getElementById("todayTotal").textContent = String(total);
-        const diff = target - total;
-        const diffText =
-          diff >= 0 ? "残り " + diff : "超過 " + Math.abs(diff);
-        document.getElementById("todayDiff").textContent = diffText;
+        const total = state.monthlySummary.totalBurn || 0;
+        const remaining = state.monthlySummary.remaining || 0;
+        document.getElementById("todayTotal").textContent = String(
+          Math.round(total)
+        );
+        document.getElementById("todayDiff").textContent = String(
+          Math.round(remaining)
+        );
       }
 
       function updateMonthlyDisplay() {
@@ -453,11 +482,22 @@
             ? "目標黒字 " + formatNumber(monthly.targetAmount)
             : "目標 0";
         document.getElementById("targetAmount").textContent = targetLabel;
+        document.getElementById("targetTotalBurn").textContent = formatNumber(
+          monthly.targetTotalBurn
+        );
+        document.getElementById("activityLevelLabel").textContent =
+          getActivityLabel(monthly.activityLevel);
+        document.getElementById("activityFactor").textContent = formatFactor(
+          monthly.activityFactor
+        );
         document.getElementById("bmrPerDay").textContent = formatNumber(
           monthly.bmrPerDay
         );
-        document.getElementById("bmrTotal").textContent = formatNumber(
-          monthly.bmrTotal
+        document.getElementById("energyPerDay").textContent = formatNumber(
+          monthly.energyPerDay
+        );
+        document.getElementById("energyTotal").textContent = formatNumber(
+          monthly.energyTotal
         );
         document.getElementById("runningTotal").textContent = formatNumber(
           monthly.runningTotal
@@ -521,12 +561,23 @@
         return Number.isFinite(num) ? String(Math.round(num)) : "0";
       }
 
+      function formatFactor(value) {
+        const num = Number(value);
+        return Number.isFinite(num) ? num.toFixed(2) : "0.00";
+      }
+
       function formatGoalKg(value) {
         const num = Number(value);
         if (!Number.isFinite(num)) {
           return "0";
         }
         return String(Math.round(num * 10) / 10);
+      }
+
+      function getActivityLabel(value) {
+        if (value === "low") return "低い";
+        if (value === "high") return "高い";
+        return "標準";
       }
 
       function setStatus(id, message) {

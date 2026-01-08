@@ -9,6 +9,7 @@ const SETTINGS_KEYS = {
   gender: "gender",
   age: "age",
   monthlyGoalKg: "monthly_goal_kg",
+  activityLevel: "activity_level",
 };
 
 function onOpen() {
@@ -58,11 +59,13 @@ function saveSettings(payload) {
   const gender = normalizeGender_(payload.gender);
   const age = toNumber_(payload.age);
   const monthlyGoalKg = toNumber_(payload.monthlyGoalKg);
+  const activityLevel = normalizeActivityLevel_(payload.activityLevel);
   upsertSetting_(sheets.settings, SETTINGS_KEYS.defaultWeightKg, defaultWeightKg);
   upsertSetting_(sheets.settings, SETTINGS_KEYS.dailyTargetKcal, dailyTargetKcal);
   upsertSetting_(sheets.settings, SETTINGS_KEYS.gender, gender);
   upsertSetting_(sheets.settings, SETTINGS_KEYS.age, age);
   upsertSetting_(sheets.settings, SETTINGS_KEYS.monthlyGoalKg, monthlyGoalKg);
+  upsertSetting_(sheets.settings, SETTINGS_KEYS.activityLevel, activityLevel);
   const settings = getSettings_(sheets.settings);
   const monthlySummary = getMonthlySummary_(
     sheets.records,
@@ -143,6 +146,10 @@ function ensureDefaultSettings_(sheet) {
   const current = getSettings_(sheet);
   upsertSetting_(sheet, SETTINGS_KEYS.defaultWeightKg, current.defaultWeightKg);
   upsertSetting_(sheet, SETTINGS_KEYS.dailyTargetKcal, current.dailyTargetKcal);
+  upsertSetting_(sheet, SETTINGS_KEYS.gender, current.gender);
+  upsertSetting_(sheet, SETTINGS_KEYS.age, current.age);
+  upsertSetting_(sheet, SETTINGS_KEYS.monthlyGoalKg, current.monthlyGoalKg);
+  upsertSetting_(sheet, SETTINGS_KEYS.activityLevel, current.activityLevel);
 }
 
 function getSettings_(sheet) {
@@ -152,6 +159,7 @@ function getSettings_(sheet) {
     gender: "male",
     age: 30,
     monthlyGoalKg: -1,
+    activityLevel: "medium",
   };
 
   const lastRow = sheet.getLastRow();
@@ -180,6 +188,9 @@ function getSettings_(sheet) {
     monthlyGoalKg: coalesceNumber_(
       map[SETTINGS_KEYS.monthlyGoalKg],
       defaults.monthlyGoalKg
+    ),
+    activityLevel: normalizeActivityLevel_(
+      map[SETTINGS_KEYS.activityLevel] || defaults.activityLevel
     ),
   };
 }
@@ -239,9 +250,12 @@ function getMonthlySummary_(sheet, settings, baseDate) {
   const daysElapsed = Math.min(date.getDate(), daysInMonth);
 
   const bmrPerDay = estimateBmr_(settings.gender, settings.age);
+  const activityFactor = resolveActivityFactor_(settings.activityLevel);
+  const energyPerDay = Math.round(bmrPerDay * activityFactor);
+  const energyTotal = Math.round(energyPerDay * daysElapsed);
   const bmrTotal = Math.round(bmrPerDay * daysElapsed);
   const runningTotal = Math.round(getMonthlyRunningTotal_(sheet, year, month));
-  const totalBurn = Math.round(bmrTotal + runningTotal);
+  const totalBurn = Math.round(energyTotal + runningTotal);
   const targetIntakeTotal = Math.round(
     toNumber_(settings.dailyTargetKcal) * daysElapsed
   );
@@ -261,16 +275,32 @@ function getMonthlySummary_(sheet, settings, baseDate) {
       : goalType === "surplus"
       ? Math.max(-deficit, 0)
       : 0;
-  const remaining = Math.max(targetAmount - progressAmount, 0);
+  let targetTotalBurn = targetIntakeTotal;
+  if (goalType === "deficit") {
+    targetTotalBurn = targetIntakeTotal + targetAmount;
+  } else if (goalType === "surplus") {
+    targetTotalBurn = Math.max(targetIntakeTotal - targetAmount, 0);
+  }
+  let remaining = 0;
+  if (goalType === "deficit") {
+    remaining = Math.max(targetTotalBurn - totalBurn, 0);
+  } else if (goalType === "surplus") {
+    remaining = Math.max(totalBurn - targetTotalBurn, 0);
+  }
 
   return {
     monthKey: monthKey,
     daysInMonth: daysInMonth,
     daysElapsed: daysElapsed,
+    activityLevel: settings.activityLevel,
+    activityFactor: activityFactor,
     bmrPerDay: Math.round(bmrPerDay),
     bmrTotal: bmrTotal,
+    energyPerDay: energyPerDay,
+    energyTotal: energyTotal,
     runningTotal: runningTotal,
     totalBurn: totalBurn,
+    targetTotalBurn: targetTotalBurn,
     targetIntakeTotal: targetIntakeTotal,
     deficit: deficit,
     goalKg: goalKg,
@@ -348,6 +378,32 @@ function normalizeGender_(value) {
     return "female";
   }
   return "";
+}
+
+function normalizeActivityLevel_(value) {
+  const str = value ? String(value).toLowerCase() : "";
+  if (
+    str === "low" ||
+    str === "medium" ||
+    str === "high" ||
+    str === "低い" ||
+    str === "標準" ||
+    str === "高い"
+  ) {
+    if (str === "低い") return "low";
+    if (str === "高い") return "high";
+    if (str === "標準") return "medium";
+    return str;
+  }
+  return "medium";
+}
+
+function resolveActivityFactor_(level) {
+  // 活動レベルの係数（目安）
+  const normalized = normalizeActivityLevel_(level);
+  if (normalized === "low") return 1.2;
+  if (normalized === "high") return 1.75;
+  return 1.55;
 }
 
 function calculateCalories_(distanceKm, durationMin, weightKg) {
