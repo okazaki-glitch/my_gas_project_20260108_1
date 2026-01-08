@@ -2,6 +2,7 @@
 <html>
   <head>
     <base target="_top" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style>
       :root {
         color-scheme: light;
@@ -58,7 +59,8 @@
       }
 
       input,
-      textarea {
+      textarea,
+      select {
         width: 100%;
         box-sizing: border-box;
         padding: 8px 10px;
@@ -72,6 +74,14 @@
       textarea {
         resize: vertical;
         min-height: 60px;
+      }
+
+      .grid-2 {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .span-2 {
+        grid-column: 1 / -1;
       }
 
       .summary {
@@ -125,6 +135,12 @@
         color: var(--muted);
         margin-top: 6px;
       }
+
+      @media (max-width: 560px) {
+        .grid-2 {
+          grid-template-columns: 1fr;
+        }
+      }
     </style>
   </head>
   <body>
@@ -133,7 +149,7 @@
 
       <div class="card">
         <h2>記録</h2>
-        <div class="grid">
+        <div class="grid grid-2">
           <div>
             <label for="date">日付</label>
             <input id="date" type="date" />
@@ -150,7 +166,7 @@
             <label for="weight">体重 (kg)</label>
             <input id="weight" type="number" step="0.1" min="0" />
           </div>
-          <div>
+          <div class="span-2">
             <label for="memo">メモ</label>
             <textarea id="memo" placeholder="天気や体調など"></textarea>
           </div>
@@ -168,8 +184,48 @@
       </div>
 
       <div class="card">
+        <h2>月間目標サマリー</h2>
+        <div class="summary">
+          <div>
+            月: <span id="monthKey">-</span>
+          </div>
+          <div>
+            目標体重変化: <span id="goalKg">0</span> kg
+          </div>
+          <div>
+            目標収支: <span id="targetAmount">0</span> kcal
+          </div>
+          <div>
+            基礎代謝 (1日): <span id="bmrPerDay">0</span> kcal
+          </div>
+          <div>
+            基礎代謝合計: <span id="bmrTotal">0</span> kcal
+          </div>
+          <div>
+            ランニング消費合計: <span id="runningTotal">0</span> kcal
+          </div>
+          <div>
+            今月ここまでの消費: <span id="totalBurn">0</span> kcal
+          </div>
+          <div>
+            今月ここまでの摂取目標: <span id="targetIntake">0</span> kcal
+          </div>
+          <div>
+            現在の収支: <span id="deficit">0</span> kcal
+          </div>
+          <div>
+            目標まで残り: <span id="remaining">0</span> kcal
+          </div>
+        </div>
+        <div class="note">
+          性別・年齢から推定した平均基礎代謝を用います。月間目標は減量なら
+          マイナス値で入力してください。
+        </div>
+      </div>
+
+      <div class="card">
         <h2>設定</h2>
-        <div class="grid">
+        <div class="grid grid-2">
           <div>
             <label for="defaultWeight">体重(kg)の初期値</label>
             <input id="defaultWeight" type="number" step="0.1" min="0" />
@@ -177,6 +233,21 @@
           <div>
             <label for="dailyTarget">1日の目標摂取カロリー (kcal)</label>
             <input id="dailyTarget" type="number" step="1" min="0" />
+          </div>
+          <div>
+            <label for="gender">性別</label>
+            <select id="gender">
+              <option value="male">男性</option>
+              <option value="female">女性</option>
+            </select>
+          </div>
+          <div>
+            <label for="age">年齢</label>
+            <input id="age" type="number" step="1" min="0" />
+          </div>
+          <div class="span-2">
+            <label for="monthlyGoal">月間目標体重変化 (kg)</label>
+            <input id="monthlyGoal" type="number" step="0.1" />
           </div>
         </div>
         <button id="saveSettingsBtn" class="secondary">設定を保存</button>
@@ -186,8 +257,30 @@
 
     <script>
       const state = {
-        settings: { defaultWeightKg: 60, dailyTargetKcal: 2000 },
+        settings: {
+          defaultWeightKg: 60,
+          dailyTargetKcal: 2000,
+          gender: "male",
+          age: 30,
+          monthlyGoalKg: -1,
+        },
         todaySummary: { totalCalories: 0, count: 0 },
+        monthlySummary: {
+          monthKey: "",
+          daysInMonth: 0,
+          daysElapsed: 0,
+          bmrPerDay: 0,
+          bmrTotal: 0,
+          runningTotal: 0,
+          totalBurn: 0,
+          targetIntakeTotal: 0,
+          deficit: 0,
+          goalKg: -1,
+          goalType: "deficit",
+          targetAmount: 0,
+          progressAmount: 0,
+          remaining: 0,
+        },
         today: "",
       };
 
@@ -221,6 +314,7 @@
         }
         state.settings = data.settings || state.settings;
         state.todaySummary = data.todaySummary || state.todaySummary;
+        state.monthlySummary = data.monthlySummary || state.monthlySummary;
         state.today = data.today || state.today;
 
         document.getElementById("date").value = state.today;
@@ -230,9 +324,14 @@
           state.settings.defaultWeightKg || "";
         document.getElementById("dailyTarget").value =
           state.settings.dailyTargetKcal || "";
+        document.getElementById("gender").value = state.settings.gender || "male";
+        document.getElementById("age").value = state.settings.age || "";
+        document.getElementById("monthlyGoal").value =
+          state.settings.monthlyGoalKg ?? "";
 
         updatePreview();
         updateSummaryDisplay();
+        updateMonthlyDisplay();
       }
 
       function saveRecord() {
@@ -254,7 +353,11 @@
             if (result && result.summary) {
               state.todaySummary = result.summary;
             }
+            if (result && result.monthlySummary) {
+              state.monthlySummary = result.monthlySummary;
+            }
             updateSummaryDisplay();
+            updateMonthlyDisplay();
             setStatus(
               "saveResult",
               "保存しました。推定消費 " + (result?.calories || 0) + " kcal"
@@ -279,15 +382,26 @@
         const payload = {
           defaultWeightKg: getNumber("defaultWeight"),
           dailyTargetKcal: getNumber("dailyTarget"),
+          gender: document.getElementById("gender").value,
+          age: getNumber("age"),
+          monthlyGoalKg: getNumber("monthlyGoal"),
         };
 
         google.script.run
           .withSuccessHandler((result) => {
             button.disabled = false;
-            state.settings = result || state.settings;
+            if (result && result.settings) {
+              state.settings = result.settings;
+            } else {
+              state.settings = result || state.settings;
+            }
+            if (result && result.monthlySummary) {
+              state.monthlySummary = result.monthlySummary;
+            }
             document.getElementById("weight").value =
               state.settings.defaultWeightKg || "";
             updateSummaryDisplay();
+            updateMonthlyDisplay();
             setStatus("settingsResult", "設定を保存しました。");
           })
           .withFailureHandler((error) => {
@@ -316,6 +430,53 @@
         const diffText =
           diff >= 0 ? "残り " + diff : "超過 " + Math.abs(diff);
         document.getElementById("todayDiff").textContent = diffText;
+      }
+
+      function updateMonthlyDisplay() {
+        const monthly = state.monthlySummary || {};
+        const monthLabel =
+          (monthly.monthKey || "-") +
+          "（" +
+          (monthly.daysElapsed || 0) +
+          "/" +
+          (monthly.daysInMonth || 0) +
+          "日）";
+        document.getElementById("monthKey").textContent = monthLabel;
+        document.getElementById("goalKg").textContent = formatGoalKg(
+          monthly.goalKg
+        );
+
+        const targetLabel =
+          monthly.goalType === "deficit"
+            ? "目標赤字 " + formatNumber(monthly.targetAmount)
+            : monthly.goalType === "surplus"
+            ? "目標黒字 " + formatNumber(monthly.targetAmount)
+            : "目標 0";
+        document.getElementById("targetAmount").textContent = targetLabel;
+        document.getElementById("bmrPerDay").textContent = formatNumber(
+          monthly.bmrPerDay
+        );
+        document.getElementById("bmrTotal").textContent = formatNumber(
+          monthly.bmrTotal
+        );
+        document.getElementById("runningTotal").textContent = formatNumber(
+          monthly.runningTotal
+        );
+        document.getElementById("totalBurn").textContent = formatNumber(
+          monthly.totalBurn
+        );
+        document.getElementById("targetIntake").textContent = formatNumber(
+          monthly.targetIntakeTotal
+        );
+
+        const balanceLabel =
+          monthly.deficit >= 0
+            ? "赤字 " + formatNumber(monthly.deficit)
+            : "黒字 " + formatNumber(Math.abs(monthly.deficit));
+        document.getElementById("deficit").textContent = balanceLabel;
+        document.getElementById("remaining").textContent = formatNumber(
+          monthly.remaining
+        );
       }
 
       function calcCalories(distanceKm, durationMin, weightKg) {
@@ -353,6 +514,19 @@
       function getNumber(id) {
         const value = Number(document.getElementById(id).value);
         return Number.isFinite(value) ? value : 0;
+      }
+
+      function formatNumber(value) {
+        const num = Number(value);
+        return Number.isFinite(num) ? String(Math.round(num)) : "0";
+      }
+
+      function formatGoalKg(value) {
+        const num = Number(value);
+        if (!Number.isFinite(num)) {
+          return "0";
+        }
+        return String(Math.round(num * 10) / 10);
       }
 
       function setStatus(id, message) {

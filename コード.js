@@ -6,6 +6,9 @@ const SHEET_NAMES = {
 const SETTINGS_KEYS = {
   defaultWeightKg: "default_weight_kg",
   dailyTargetKcal: "daily_target_kcal",
+  gender: "gender",
+  age: "age",
+  monthlyGoalKg: "monthly_goal_kg",
 };
 
 function onOpen() {
@@ -35,16 +38,38 @@ function getAppData() {
     "yyyy-MM-dd"
   );
   const todaySummary = getDailySummary_(sheets.records, today);
-  return { settings: settings, today: today, todaySummary: todaySummary };
+  const monthlySummary = getMonthlySummary_(
+    sheets.records,
+    settings,
+    new Date()
+  );
+  return {
+    settings: settings,
+    today: today,
+    todaySummary: todaySummary,
+    monthlySummary: monthlySummary,
+  };
 }
 
 function saveSettings(payload) {
   const sheets = initSheets_();
   const defaultWeightKg = toNumber_(payload.defaultWeightKg);
   const dailyTargetKcal = toNumber_(payload.dailyTargetKcal);
+  const gender = normalizeGender_(payload.gender);
+  const age = toNumber_(payload.age);
+  const monthlyGoalKg = toNumber_(payload.monthlyGoalKg);
   upsertSetting_(sheets.settings, SETTINGS_KEYS.defaultWeightKg, defaultWeightKg);
   upsertSetting_(sheets.settings, SETTINGS_KEYS.dailyTargetKcal, dailyTargetKcal);
-  return getSettings_(sheets.settings);
+  upsertSetting_(sheets.settings, SETTINGS_KEYS.gender, gender);
+  upsertSetting_(sheets.settings, SETTINGS_KEYS.age, age);
+  upsertSetting_(sheets.settings, SETTINGS_KEYS.monthlyGoalKg, monthlyGoalKg);
+  const settings = getSettings_(sheets.settings);
+  const monthlySummary = getMonthlySummary_(
+    sheets.records,
+    settings,
+    new Date()
+  );
+  return { settings: settings, monthlySummary: monthlySummary };
 }
 
 function saveRunRecord(payload) {
@@ -76,7 +101,13 @@ function saveRunRecord(payload) {
     "yyyy-MM-dd"
   );
   const summary = getDailySummary_(sheets.records, dateKey);
-  return { calories: calories, summary: summary };
+  const settings = getSettings_(sheets.settings);
+  const monthlySummary = getMonthlySummary_(
+    sheets.records,
+    settings,
+    new Date()
+  );
+  return { calories: calories, summary: summary, monthlySummary: monthlySummary };
 }
 
 function initSheets_() {
@@ -118,6 +149,9 @@ function getSettings_(sheet) {
   const defaults = {
     defaultWeightKg: 60,
     dailyTargetKcal: 2000,
+    gender: "male",
+    age: 30,
+    monthlyGoalKg: -1,
   };
 
   const lastRow = sheet.getLastRow();
@@ -133,11 +167,20 @@ function getSettings_(sheet) {
   });
 
   return {
-    defaultWeightKg:
-      toNumber_(map[SETTINGS_KEYS.defaultWeightKg]) || defaults.defaultWeightKg,
-    dailyTargetKcal:
-      toNumber_(map[SETTINGS_KEYS.dailyTargetKcal]) ||
-      defaults.dailyTargetKcal,
+    defaultWeightKg: coalesceNumber_(
+      map[SETTINGS_KEYS.defaultWeightKg],
+      defaults.defaultWeightKg
+    ),
+    dailyTargetKcal: coalesceNumber_(
+      map[SETTINGS_KEYS.dailyTargetKcal],
+      defaults.dailyTargetKcal
+    ),
+    gender: map[SETTINGS_KEYS.gender] || defaults.gender,
+    age: coalesceNumber_(map[SETTINGS_KEYS.age], defaults.age),
+    monthlyGoalKg: coalesceNumber_(
+      map[SETTINGS_KEYS.monthlyGoalKg],
+      defaults.monthlyGoalKg
+    ),
   };
 }
 
@@ -186,6 +229,127 @@ function getDailySummary_(sheet, dateKey) {
   return { date: dateKey, totalCalories: Math.round(total), count: count };
 }
 
+function getMonthlySummary_(sheet, settings, baseDate) {
+  const date = baseDate instanceof Date ? baseDate : new Date();
+  const tz = Session.getScriptTimeZone();
+  const monthKey = Utilities.formatDate(date, tz, "yyyy-MM");
+  const year = date.getFullYear();
+  const month = date.getMonth();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const daysElapsed = Math.min(date.getDate(), daysInMonth);
+
+  const bmrPerDay = estimateBmr_(settings.gender, settings.age);
+  const bmrTotal = Math.round(bmrPerDay * daysElapsed);
+  const runningTotal = Math.round(getMonthlyRunningTotal_(sheet, year, month));
+  const totalBurn = Math.round(bmrTotal + runningTotal);
+  const targetIntakeTotal = Math.round(
+    toNumber_(settings.dailyTargetKcal) * daysElapsed
+  );
+  const deficit = Math.round(totalBurn - targetIntakeTotal);
+
+  const goalKg = toNumber_(settings.monthlyGoalKg);
+  const targetAmount = Math.round(Math.abs(goalKg) * 7200);
+  let goalType = "maintain";
+  if (goalKg < 0) {
+    goalType = "deficit";
+  } else if (goalKg > 0) {
+    goalType = "surplus";
+  }
+  const progressAmount =
+    goalType === "deficit"
+      ? Math.max(deficit, 0)
+      : goalType === "surplus"
+      ? Math.max(-deficit, 0)
+      : 0;
+  const remaining = Math.max(targetAmount - progressAmount, 0);
+
+  return {
+    monthKey: monthKey,
+    daysInMonth: daysInMonth,
+    daysElapsed: daysElapsed,
+    bmrPerDay: Math.round(bmrPerDay),
+    bmrTotal: bmrTotal,
+    runningTotal: runningTotal,
+    totalBurn: totalBurn,
+    targetIntakeTotal: targetIntakeTotal,
+    deficit: deficit,
+    goalKg: goalKg,
+    goalType: goalType,
+    targetAmount: targetAmount,
+    progressAmount: progressAmount,
+    remaining: remaining,
+  };
+}
+
+function getMonthlyRunningTotal_(sheet, year, month) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) {
+    return 0;
+  }
+
+  const values = sheet.getRange(2, 1, lastRow - 1, 5).getValues();
+  let total = 0;
+  values.forEach((row) => {
+    const cell = row[0];
+    if (!cell) {
+      return;
+    }
+    const date = cell instanceof Date ? cell : new Date(cell);
+    if (isNaN(date.getTime())) {
+      return;
+    }
+    if (date.getFullYear() === year && date.getMonth() === month) {
+      total += toNumber_(row[4]);
+    }
+  });
+  return total;
+}
+
+function estimateBmr_(gender, age) {
+  const normalized = normalizeGender_(gender);
+  const value = toNumber_(age);
+  if (!normalized || !value) {
+    return 0;
+  }
+
+  // 年齢・性別からの簡易平均推定（個人差を考慮しない）
+  const table = {
+    male: [
+      { min: 0, max: 17, kcal: 1350 },
+      { min: 18, max: 29, kcal: 1530 },
+      { min: 30, max: 49, kcal: 1500 },
+      { min: 50, max: 69, kcal: 1400 },
+      { min: 70, max: 120, kcal: 1280 },
+    ],
+    female: [
+      { min: 0, max: 17, kcal: 1250 },
+      { min: 18, max: 29, kcal: 1210 },
+      { min: 30, max: 49, kcal: 1170 },
+      { min: 50, max: 69, kcal: 1110 },
+      { min: 70, max: 120, kcal: 1010 },
+    ],
+  };
+
+  const list = table[normalized];
+  for (let i = 0; i < list.length; i++) {
+    if (value >= list[i].min && value <= list[i].max) {
+      return list[i].kcal;
+    }
+  }
+  return list[list.length - 1].kcal;
+}
+
+function normalizeGender_(value) {
+  const str = value ? String(value).toLowerCase() : "";
+  if (str === "male" || str === "m" || str === "男性") {
+    return "male";
+  }
+  if (str === "female" || str === "f" || str === "女性") {
+    return "female";
+  }
+  return "";
+}
+
 function calculateCalories_(distanceKm, durationMin, weightKg) {
   if (!distanceKm || !weightKg) {
     return 0;
@@ -230,4 +394,12 @@ function normalizeDate_(value) {
 function toNumber_(value) {
   const num = Number(value);
   return isNaN(num) ? 0 : num;
+}
+
+function coalesceNumber_(value, fallback) {
+  if (value === "" || value === null || value === undefined) {
+    return fallback;
+  }
+  const num = Number(value);
+  return Number.isFinite(num) ? num : fallback;
 }
