@@ -140,6 +140,42 @@
         .grid-2 {
           grid-template-columns: 1fr;
         }
+
+        body {
+          font-size: 15px;
+        }
+
+        h1 {
+          font-size: 22px;
+        }
+
+        h2 {
+          font-size: 16px;
+        }
+
+        .app {
+          padding: 18px 18px 28px;
+        }
+
+        .card {
+          padding: 16px;
+        }
+
+        input,
+        textarea,
+        select {
+          font-size: 15px;
+          padding: 10px 12px;
+        }
+
+        button {
+          font-size: 14px;
+          padding: 10px 18px;
+        }
+
+        .summary {
+          font-size: 14px;
+        }
       }
     </style>
   </head>
@@ -174,7 +210,7 @@
 
         <div class="summary">
           <div>推定消費: <span id="previewCalories">0</span> kcal</div>
-          <div>今月の総消費: <span id="todayTotal">0</span> kcal</div>
+          <div>今月の消費合計: <span id="todayTotal">0</span> kcal</div>
           <div>目標まで残り: <span id="todayDiff">0</span> kcal</div>
         </div>
         <div class="note">時間を入力すると速度に応じたMETで計算します。</div>
@@ -193,7 +229,7 @@
             目標体重変化: <span id="goalKg">0</span> kg
           </div>
           <div>
-            目標収支: <span id="targetAmount">0</span> kcal
+            目標消費(減量分): <span id="targetAmount">0</span> kcal
           </div>
           <div>
             目標総消費: <span id="targetTotalBurn">0</span> kcal
@@ -217,7 +253,7 @@
             ランニング消費合計: <span id="runningTotal">0</span> kcal
           </div>
           <div>
-            今月ここまでの総消費: <span id="totalBurn">0</span> kcal
+            今月ここまでの消費合計: <span id="totalBurn">0</span> kcal
           </div>
           <div>
             今月ここまでの摂取目標: <span id="targetIntake">0</span> kcal
@@ -231,7 +267,7 @@
         </div>
         <div class="note">
           性別・年齢の基礎代謝に活動レベル係数を掛けて算出します。月間目標は減量なら
-          マイナス値で入力してください。
+          マイナス値で入力してください。目標まで残りはランニング消費のみで計算します。
         </div>
       </div>
 

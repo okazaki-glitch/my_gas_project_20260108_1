@@ -262,31 +262,21 @@ function getMonthlySummary_(sheet, settings, baseDate) {
   const deficit = Math.round(totalBurn - targetIntakeTotal);
 
   const goalKg = toNumber_(settings.monthlyGoalKg);
-  const targetAmount = Math.round(Math.abs(goalKg) * 7200);
+  const targetAmount = Math.round(Math.abs(goalKg) * 7500);
   let goalType = "maintain";
   if (goalKg < 0) {
     goalType = "deficit";
   } else if (goalKg > 0) {
     goalType = "surplus";
   }
-  const progressAmount =
-    goalType === "deficit"
-      ? Math.max(deficit, 0)
-      : goalType === "surplus"
-      ? Math.max(-deficit, 0)
-      : 0;
+  const progressAmount = Math.min(runningTotal, targetAmount);
   let targetTotalBurn = targetIntakeTotal;
   if (goalType === "deficit") {
     targetTotalBurn = targetIntakeTotal + targetAmount;
   } else if (goalType === "surplus") {
     targetTotalBurn = Math.max(targetIntakeTotal - targetAmount, 0);
   }
-  let remaining = 0;
-  if (goalType === "deficit") {
-    remaining = Math.max(targetTotalBurn - totalBurn, 0);
-  } else if (goalType === "surplus") {
-    remaining = Math.max(totalBurn - targetTotalBurn, 0);
-  }
+  const remaining = Math.max(targetAmount - runningTotal, 0);
 
   return {
     monthKey: monthKey,
